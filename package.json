@@ -1,0 +1,19 @@
+{
+  "name": "fandf-stock-checker",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev:client": "npm run dev -w client",
+    "dev:server": "npm run dev -w server",
+    "build:client": "npm run build -w client",
+    "build:server": "npm run build -w server",
+    "lint:client": "npm run lint -w client",
+    "lint:server": "npm run lint -w server",
+    "test:server": "npm run test -w server",
+    "seed:server": "npm run seed -w server"
+  }
+}
