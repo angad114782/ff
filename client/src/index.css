@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/*
+  Self-hosted per the brand guide (Section 04 Typography — Spline Sans, all
+  weights). Using the licensed static .woff2 files instead of the Google
+  Fonts CDN so the app doesn't depend on an external request.
+*/
+@font-face {
+  font-family: "Spline Sans";
+  src: url("./assets/fonts/SplineSans-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Spline Sans";
+  src: url("./assets/fonts/SplineSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Spline Sans";
+  src: url("./assets/fonts/SplineSans-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Spline Sans";
+  src: url("./assets/fonts/SplineSans-SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Spline Sans";
+  src: url("./assets/fonts/SplineSans-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/*
+  Adventures Unlimited is a paid Adobe font and isn't bundled here.
+  Falling back to Spline Sans SemiBold italic per the brand guide's own
+  fallback rule (Section 2.2) until a licensed font file is provided.
+*/
+@theme {
+  --color-terracotta: #B25E44;
+  --color-terracotta-deep: #8D381E;
+  --color-sand: #F2E5D6;
+  --color-sage-soft: #AEAC90;
+  --color-sage-grey: #C9C6B3;
+  --color-linen: #FCFDF5;
+  --color-green-livedin: #525937;
+  /* Not in the brand palette — a neutral ink for body copy, since none of
+     the brand colors are meant to carry long-form text (terracotta-deep
+     is reserved for error/destructive states). */
+  --color-ink: #2B2620;
+
+  --font-sans: "Spline Sans", sans-serif;
+  --font-display: "Spline Sans", sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-linen text-ink font-sans antialiased;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-style: italic;
+    font-weight: 600;
+  }
+}
