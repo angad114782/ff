@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Badge, Table } from '../components/ui'
+import { Table } from '../components/ui'
 import { stockItems } from '../mock/data'
 
 function BackButton({ onClick }) {
@@ -18,28 +18,9 @@ function BackButton({ onClick }) {
 
 function DetailRow({ label, value }) {
   return (
-    <div className="flex justify-between border-b border-sage-grey/60 pb-2.5">
+    <div className="flex justify-between border-b border-sage-grey/60 pb-2.5 last:border-b-0">
       <span className="text-xs font-medium uppercase tracking-wide text-ink/50">{label}</span>
       <span className="font-medium text-ink">{value}</span>
-    </div>
-  )
-}
-
-function MaskedRow({ label, value, revealed, onReveal }) {
-  return (
-    <div className="flex items-center justify-between border-b border-sage-grey/60 pb-2.5">
-      <span className="text-xs font-medium uppercase tracking-wide text-ink/50">{label}</span>
-      {revealed ? (
-        <span className="font-medium text-ink">₹{value.toLocaleString('en-IN')}</span>
-      ) : (
-        <button
-          type="button"
-          onClick={onReveal}
-          className="rounded-full bg-terracotta/10 px-3 py-1 text-xs font-medium text-terracotta transition-colors hover:bg-terracotta/20"
-        >
-          Show
-        </button>
-      )}
     </div>
   )
 }
@@ -47,7 +28,6 @@ function MaskedRow({ label, value, revealed, onReveal }) {
 const batchColumns = [
   { key: 'batch', label: 'Batch' },
   { key: 'loc', label: 'Loc' },
-  { key: 'company', label: 'Company' },
   { key: 'qty', label: 'Qty' },
 ]
 
@@ -55,7 +35,6 @@ export default function ItemDetail({ backPath }) {
   const { code } = useParams()
   const navigate = useNavigate()
   const [infoTab, setInfoTab] = useState('po')
-  const [revealed, setRevealed] = useState({ purchasePrice: false, mrp: false, dp: false })
 
   const item = stockItems.find((i) => i.code.toLowerCase() === (code ?? '').toLowerCase())
 
@@ -75,11 +54,6 @@ export default function ItemDetail({ backPath }) {
   const totalAvailable = totalQty - totalReservedQty
   const totalQtyInPO = item.locations.reduce((sum, loc) => sum + loc.poDetails.qtyInPO, 0)
   const allBatches = item.locations.flatMap((loc) => loc.batches)
-  const inStock = item.locations.some((loc) => loc.status === 'in_stock')
-
-  function reveal(field) {
-    setRevealed((r) => ({ ...r, [field]: true }))
-  }
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -105,19 +79,13 @@ export default function ItemDetail({ backPath }) {
               <h1 className="text-xl font-semibold uppercase tracking-wide text-ink">{item.name}</h1>
               <div className="mt-4 space-y-2.5">
                 <DetailRow label="Product Code" value={item.code} />
-                <DetailRow label="Search Name" value={item.searchName} />
                 <DetailRow label="Current Stock" value={totalQty} />
-                <div className="flex items-center justify-between pb-2.5">
-                  <span className="text-xs font-medium uppercase tracking-wide text-ink/50">Status</span>
-                  <Badge variant={inStock ? 'success' : 'error'}>{inStock ? 'In Stock' : 'Out of Stock'}</Badge>
-                </div>
               </div>
             </div>
 
             <div className="space-y-2.5 border-t border-sage-grey pt-4 text-sm">
               <DetailRow label="Reserved Qty" value={totalReservedQty} />
               <DetailRow label="Current Available" value={totalAvailable} />
-              <MaskedRow label="MRP" value={location.mrp} revealed={revealed.mrp} onReveal={() => reveal('mrp')} />
             </div>
 
             <div>
@@ -144,13 +112,6 @@ export default function ItemDetail({ backPath }) {
                   <div className="space-y-2.5 text-sm">
                     <DetailRow label="Qty in PO" value={totalQtyInPO} />
                     <DetailRow label="Expected" value={location.poDetails.expected} />
-                    <DetailRow label="Bilty No" value={location.poDetails.biltyNo} />
-                    <DetailRow label="Bilty Date" value={location.poDetails.biltyDate} />
-                    <DetailRow label="Transport" value={location.poDetails.transport} />
-                    <div className="flex items-center justify-between pb-2.5">
-                      <span className="text-xs font-medium uppercase tracking-wide text-ink/50">Status</span>
-                      <Badge variant="neutral">{location.poDetails.status}</Badge>
-                    </div>
                   </div>
 
                   <Table columns={batchColumns} rows={allBatches} emptyMessage="No batches recorded." />
