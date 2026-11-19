@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Card, Badge, Table, Pagination, TableSkeleton } from '../../components/ui'
-import { useApp } from '../../context/AppContext'
-import { useLoading } from '../../hooks/useLoading'
+import { useFetch } from '../../hooks/useFetch'
 
 const TYPE_FILTERS = [
   { value: 'all', label: 'All' },
   { value: 'login', label: 'Logins' },
   { value: 'search', label: 'Searches' },
+  { value: 'reset_request', label: 'Reset requests' },
+  { value: 'problem', label: 'Problems' },
 ]
+
+const TYPE_LABELS = { login: 'Login', search: 'Search', reset_request: 'Reset request', problem: 'Problem' }
 
 function formatTimestamp(iso) {
   return new Date(iso).toLocaleString('en-IN', {
@@ -19,20 +22,17 @@ function formatTimestamp(iso) {
 }
 
 export default function Logs() {
-  const { logs } = useApp()
-  const isLoading = useLoading()
   const [filter, setFilter] = useState('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
 
-  const filtered = useMemo(
-    () => (filter === 'all' ? logs : logs.filter((log) => log.type === filter)),
-    [logs, filter],
-  )
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const query = new URLSearchParams({ page, pageSize, ...(filter === 'all' ? {} : { type: filter }) })
+  const { data, loading, error } = useFetch(`/api/admin/logs?${query}`)
+  const logs = data?.logs ?? []
+  const total = data?.total ?? 0
+  const isLoading = loading && !data
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const currentPage = Math.min(page, totalPages)
-  const pageItems = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   function handleFilterChange(value) {
     setFilter(value)
@@ -44,9 +44,7 @@ export default function Logs() {
       key: 'type',
       label: 'Type',
       render: (row) => (
-        <Badge variant={row.type === 'login' ? 'neutral' : 'success'}>
-          {row.type === 'login' ? 'Login' : 'Search'}
-        </Badge>
+        <Badge variant={row.type === 'search' ? 'success' : row.type === 'problem' ? 'error' : 'neutral'}>{TYPE_LABELS[row.type]}</Badge>
       ),
     },
     {
@@ -65,6 +63,13 @@ export default function Logs() {
       render: (row) =>
         row.type === 'login' ? (
           <span className="text-ink/70">Logged in</span>
+        ) : row.type === 'problem' ? (
+          <span className="text-terracotta-deep">
+            {row.detail}
+            {row.query ? <span className="text-ink/60"> · item {row.query}</span> : null}
+          </span>
+        ) : row.type === 'reset_request' ? (
+          <span className="text-ink/70">Asked for a password reset — set one under Salesmen</span>
         ) : (
           <span className="flex flex-wrap items-center gap-2 text-ink/70">
             Searched <span className="font-medium text-ink">{row.query}</span>
@@ -83,11 +88,11 @@ export default function Logs() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-ink">Activity Logs</h1>
-        <p className="text-sm text-ink/70">Salesman logins and product searches, most recent first.</p>
+        <p className="text-sm text-ink/70">Salesman logins, searches, password-reset requests and problems (vendor or Business Central failures), most recent first.</p>
       </div>
 
       <Card>
-        <div className="mb-4 flex gap-2">
+        <div className="mb-4 flex flex-wrap gap-2">
           {TYPE_FILTERS.map((f) => (
             <button
               key={f.value}
@@ -102,16 +107,17 @@ export default function Logs() {
           ))}
         </div>
 
+        {error && <p className="mb-3 text-sm text-terracotta-deep">{error}</p>}
         {isLoading ? (
           <TableSkeleton columns={4} rows={pageSize > 10 ? 10 : pageSize} />
         ) : (
           <>
-            <Table columns={columns} rows={pageItems} emptyMessage="No activity yet." />
+            <Table columns={columns} rows={logs} emptyMessage="No activity yet." />
             <div className="mt-4">
               <Pagination
                 page={currentPage}
                 pageSize={pageSize}
-                totalItems={filtered.length}
+                totalItems={total}
                 onPageChange={setPage}
                 onPageSizeChange={(size) => {
                   setPageSize(size)

@@ -1,61 +1,57 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Card, Button, Badge } from '../../components/ui'
-import { useApp } from '../../context/AppContext'
+import { api } from '../../api'
+import { useFetch } from '../../hooks/useFetch'
 
-function readAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
-function mediaType(file) {
-  if (file.type.startsWith('image/')) return 'image'
-  if (file.type.startsWith('video/')) return 'video'
-  return 'pdf'
-}
+const MAX_MB = 100
 
 export default function DashboardContent() {
-  const { heroImages, setHeroImages, upcomingMedia, setUpcomingMedia, storageError, setStorageError } = useApp()
+  const { data, loading, error: loadError, reload } = useFetch('/api/media')
+  const heroImages = data?.heroImages ?? []
+  const upcomingMedia = data?.upcoming ?? []
+  const [uploadError, setUploadError] = useState('')
+  const [uploading, setUploading] = useState(false)
   const imageInputRef = useRef(null)
   const mediaInputRef = useRef(null)
 
-  async function handleImagesChosen(e) {
+  async function upload(kind, e) {
     const files = Array.from(e.target.files ?? [])
     e.target.value = ''
     if (!files.length) return
-    setStorageError('')
-    const uploaded = await Promise.all(
-      files.map(async (file) => ({ id: `${Date.now()}-${Math.random()}`, name: file.name, dataUrl: await readAsDataUrl(file) })),
-    )
-    setHeroImages((list) => [...list, ...uploaded])
+    setUploadError('')
+    const tooBig = files.find((f) => f.size > MAX_MB * 1024 * 1024)
+    if (tooBig) {
+      setUploadError(`${tooBig.name} is larger than ${MAX_MB} MB.`)
+      return
+    }
+    const form = new FormData()
+    files.forEach((f) => form.append('files', f))
+    setUploading(true)
+    try {
+      await api.upload(`/api/media/${kind}`, form)
+      reload()
+    } catch (err) {
+      setUploadError(err.message)
+    } finally {
+      setUploading(false)
+    }
   }
 
-  async function handleMediaChosen(e) {
-    const files = Array.from(e.target.files ?? [])
-    e.target.value = ''
-    if (!files.length) return
-    setStorageError('')
-    const uploaded = await Promise.all(
-      files.map(async (file) => ({
-        id: `${Date.now()}-${Math.random()}`,
-        name: file.name,
-        type: mediaType(file),
-        dataUrl: await readAsDataUrl(file),
-      })),
-    )
-    setUpcomingMedia((list) => [...list, ...uploaded])
+  async function remove(id) {
+    setUploadError('')
+    try {
+      await api.del(`/api/media/${id}`)
+      reload()
+    } catch (err) {
+      setUploadError(err.message)
+    }
   }
 
-  function removeHeroImage(id) {
-    setHeroImages((list) => list.filter((img) => img.id !== id))
-  }
-
-  function removeMedia(id) {
-    setUpcomingMedia((list) => list.filter((item) => item.id !== id))
-  }
+  const handleImagesChosen = (e) => upload('hero', e)
+  const handleMediaChosen = (e) => upload('upcoming', e)
+  const removeHeroImage = remove
+  const removeMedia = remove
+  const storageError = uploadError || loadError
 
   return (
     <div className="space-y-6">
@@ -76,24 +72,28 @@ export default function DashboardContent() {
       <Card
         title="Hero Images"
         action={
-          <Button onClick={() => imageInputRef.current?.click()}>Upload Images</Button>
+          <Button disabled={uploading} onClick={() => imageInputRef.current?.click()}>
+            {uploading ? 'Uploading…' : 'Upload Images'}
+          </Button>
         }
       >
         <input
           ref={imageInputRef}
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/png,image/webp"
           multiple
           className="hidden"
           onChange={handleImagesChosen}
         />
-        {heroImages.length === 0 ? (
+        {loading && !data ? (
+          <p className="text-sm text-ink/60">Loading…</p>
+        ) : heroImages.length === 0 ? (
           <p className="text-sm text-ink/60">No hero images uploaded yet.</p>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
             {heroImages.map((img) => (
               <div key={img.id} className="group relative overflow-hidden rounded-lg border border-sage-grey">
-                <img src={img.dataUrl} alt={img.name} className="aspect-video w-full object-cover" />
+                <img src={img.url} alt={img.name} className="aspect-video w-full object-cover" />
                 <button
                   type="button"
                   onClick={() => removeHeroImage(img.id)}
@@ -115,7 +115,7 @@ export default function DashboardContent() {
         <input
           ref={mediaInputRef}
           type="file"
-          accept="application/pdf,image/*,video/*"
+          accept="application/pdf,image/jpeg,image/png,image/webp,video/mp4,video/webm"
           multiple
           className="hidden"
           onChange={handleMediaChosen}
@@ -132,7 +132,7 @@ export default function DashboardContent() {
                 <div className="flex items-center gap-3 overflow-hidden">
                   <Badge variant="neutral">{item.type.toUpperCase()}</Badge>
                   <a
-                    href={item.dataUrl}
+                    href={item.url}
                     target="_blank"
                     rel="noreferrer"
                     className="truncate text-sm font-medium text-terracotta hover:underline"

@@ -1,15 +1,18 @@
 import { useState } from 'react'
 import { Card, Input, Button } from '../../components/ui'
-import { adminProfile } from '../../mock/data'
+import { api } from '../../api'
+import { useApp } from '../../context/AppContext'
 
 export default function Profile() {
-  const [form, setForm] = useState(adminProfile)
+  const { currentUser, setCurrentUser } = useApp()
+  const [form, setForm] = useState({ name: currentUser.name, email: currentUser.email, phone: currentUser.phone })
   const [saved, setSaved] = useState(false)
+  const [profileError, setProfileError] = useState('')
   const [passwords, setPasswords] = useState({ current: '', next: '', confirm: '' })
   const [passwordError, setPasswordError] = useState('')
   const [passwordSaved, setPasswordSaved] = useState(false)
 
-  const initials = form.name
+  const initials = currentUser.name
     .split(' ')
     .map((part) => part[0])
     .join('')
@@ -29,22 +32,37 @@ export default function Profile() {
     }
   }
 
-  function handleProfileSubmit(e) {
+  async function handleProfileSubmit(e) {
     e.preventDefault()
-    // TODO: wire up to PUT /api/admin/profile once the Express backend exists.
-    setSaved(true)
+    setProfileError('')
+    try {
+      const { user } = await api.put('/api/auth/profile', form)
+      setCurrentUser(user)
+      setSaved(true)
+    } catch (err) {
+      setProfileError(err.message)
+    }
   }
 
-  function handlePasswordSubmit(e) {
+  async function handlePasswordSubmit(e) {
     e.preventDefault()
+    setPasswordSaved(false)
+    if (passwords.next.length < 8) {
+      setPasswordError('New password must be at least 8 characters.')
+      return
+    }
     if (passwords.next !== passwords.confirm) {
       setPasswordError('New password and confirmation do not match.')
       return
     }
-    // TODO: wire up to POST /api/admin/change-password once the Express backend exists.
-    setPasswordError('')
-    setPasswordSaved(true)
-    setPasswords({ current: '', next: '', confirm: '' })
+    try {
+      await api.post('/api/auth/change-password', { current: passwords.current, next: passwords.next })
+      setPasswordError('')
+      setPasswordSaved(true)
+      setPasswords({ current: '', next: '', confirm: '' })
+    } catch (err) {
+      setPasswordError(err.message)
+    }
   }
 
   return (
@@ -60,15 +78,16 @@ export default function Profile() {
             {initials}
           </div>
           <div>
-            <p className="text-lg font-medium text-ink">{form.name}</p>
-            <p className="text-sm text-ink/60">{form.role}</p>
+            <p className="text-lg font-medium text-ink">{currentUser.name}</p>
+            <p className="text-sm text-ink/60">Administrator</p>
           </div>
         </div>
 
         <form className="space-y-4" onSubmit={handleProfileSubmit}>
           <Input id="name" label="Name" value={form.name} onChange={update('name')} required />
           <Input id="email" label="Email" type="email" value={form.email} onChange={update('email')} required />
-          <Input id="phone" label="Phone" value={form.phone} onChange={update('phone')} required />
+          <Input id="phone" label="Phone" value={form.phone} onChange={update('phone')} />
+          {profileError && <p className="text-sm text-terracotta-deep">{profileError}</p>}
           <div className="flex items-center gap-4 pt-2">
             <Button type="submit">Save Changes</Button>
             {saved && <p className="text-sm text-green-livedin">Profile saved.</p>}

@@ -1,5 +1,7 @@
-node_modules/
-dist/
-.vscode/
-.DS_Store
 *.pdf
+.DS_Store
+.env
+.vscode/
+dist/
+node_modules/
+server/data/

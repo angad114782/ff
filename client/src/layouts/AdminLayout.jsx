@@ -8,7 +8,7 @@ const navItems = [
   { to: '/admin/dashboard-content', label: 'Dashboard Content' },
   { to: '/admin/config', label: 'API Config' },
   { to: '/admin/salesmen', label: 'Salesmen' },
-  { to: '/admin/stock-upload', label: 'Stock Sync' },
+  { to: '/admin/vendors', label: 'Vendors' },
   { to: '/admin/stock-check', label: 'Stock Check' },
   { to: '/admin/logs', label: 'Logs' },
   { to: '/admin/profile', label: 'Profile' },
@@ -57,8 +57,8 @@ export default function AdminLayout() {
     setDrawerVisible(false)
   }, [menuOpen])
 
-  function handleLogout() {
-    logout()
+  async function handleLogout() {
+    await logout()
     navigate('/')
   }
 

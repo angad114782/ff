@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useApp } from '../../context/AppContext'
+import { useFetch } from '../../hooks/useFetch'
 
 const SLIDE_INTERVAL_MS = 4000
 
@@ -16,7 +16,7 @@ function placeholderHeroSvg(label) {
 const PLACEHOLDER_HERO_IMAGES = [1, 2, 3].map((n) => ({
   id: `placeholder-hero-${n}`,
   name: `Hero Banner ${n}`,
-  dataUrl: placeholderHeroSvg(`Hero Banner ${n} (placeholder)`),
+  url: placeholderHeroSvg(`Hero Banner ${n} (placeholder)`),
 }))
 
 const PLACEHOLDER_MEDIA = [
@@ -44,7 +44,7 @@ function HeroCarousel({ images }) {
         style={{ transform: `translateX(-${activeIndex * 100}%)` }}
       >
         {images.map((img) => (
-          <img key={img.id} src={img.dataUrl} alt={img.name} className="aspect-video w-full shrink-0 object-cover" />
+          <img key={img.id} src={img.url} alt={img.name} className="aspect-video w-full shrink-0 object-cover" />
         ))}
       </div>
 
@@ -85,17 +85,17 @@ function PlaceholderMediaCard({ name }) {
 function MediaCard({ item }) {
   return (
     <a
-      href={item.dataUrl}
+      href={item.url}
       target="_blank"
       rel="noreferrer"
       className="group overflow-hidden rounded-xl border border-sage-grey bg-linen transition-shadow duration-150 hover:shadow-md"
     >
       {item.type === 'image' ? (
-        <img src={item.dataUrl} alt={item.name} className="h-64 w-full object-cover" />
+        <img src={item.url} alt={item.name} className="h-64 w-full object-cover" />
       ) : item.type === 'video' ? (
-        <video src={item.dataUrl} controls className="h-64 w-full bg-ink object-cover" />
+        <video src={item.url} controls className="h-64 w-full bg-ink object-cover" />
       ) : (
-        <embed src={item.dataUrl} type="application/pdf" className="h-64 w-full pointer-events-none" />
+        <embed src={item.url} type="application/pdf" className="h-64 w-full pointer-events-none" />
       )}
       <p className="truncate border-t border-sage-grey px-3 py-2.5 text-sm font-medium text-ink group-hover:text-terracotta">
         {item.name}
@@ -105,7 +105,9 @@ function MediaCard({ item }) {
 }
 
 export default function Dashboard() {
-  const { heroImages, upcomingMedia } = useApp()
+  const { data } = useFetch('/api/media')
+  const heroImages = data?.heroImages ?? []
+  const upcomingMedia = data?.upcoming ?? []
 
   const displayHeroImages = heroImages.length > 0 ? heroImages : PLACEHOLDER_HERO_IMAGES
   const showingPlaceholderMedia = upcomingMedia.length === 0
