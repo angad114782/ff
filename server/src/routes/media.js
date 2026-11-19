@@ -1,32 +1,36 @@
 import { Router } from 'express'
-import { randomBytes } from 'node:crypto'
-import { mkdirSync, rmSync } from 'node:fs'
-import { extname, join } from 'node:path'
 import multer from 'multer'
-import { config } from '../config.js'
-import { db } from '../db.js'
 import { badRequest, notFound } from '../lib/errors.js'
+import { media, mediaFiles, nextId, now, row } from '../db.js'
 import { requireAuth, requireRole } from '../middleware/auth.js'
 
-mkdirSync(config.uploadDir, { recursive: true })
-
-// Allowlist by mime type; the stored extension is derived from the mime, never from the client's filename.
+// Allowlist by mime type. Uploaded files are stored inside the database (GridFS), so the app needs no disk.
 const TYPES = {
-  'image/jpeg': { type: 'image', ext: '.jpg' },
-  'image/png': { type: 'image', ext: '.png' },
-  'image/webp': { type: 'image', ext: '.webp' },
-  'application/pdf': { type: 'pdf', ext: '.pdf' },
-  'video/mp4': { type: 'video', ext: '.mp4' },
-  'video/webm': { type: 'video', ext: '.webm' },
+  'image/jpeg': { type: 'image' },
+  'image/png': { type: 'image' },
+  'image/webp': { type: 'image' },
+  'application/pdf': { type: 'pdf' },
+  'video/mp4': { type: 'video' },
+  'video/webm': { type: 'video' },
 }
 const MAX_BYTES = 100 * 1024 * 1024
 
+// Streams each upload straight into GridFS (no temp files, no 100 MB buffers in memory).
+const gridStorage = {
+  _handleFile(_req, file, cb) {
+    const out = mediaFiles.openUploadStream(file.originalname, { contentType: file.mimetype })
+    file.stream.pipe(out)
+    out.on('error', cb)
+    out.on('finish', () => cb(null, { fileId: out.id, size: out.length }))
+  },
+  _removeFile(_req, file, cb) {
+    mediaFiles.delete(file.fileId).then(() => cb(null), () => cb(null))
+  },
+}
+
 const upload = multer({
   limits: { fileSize: MAX_BYTES, files: 10 },
-  storage: multer.diskStorage({
-    destination: config.uploadDir,
-    filename: (_req, file, cb) => cb(null, `${randomBytes(16).toString('hex')}${TYPES[file.mimetype]?.ext ?? ''}`),
-  }),
+  storage: gridStorage,
   fileFilter: (req, file, cb) => {
     // Hero banners must be images; "upcoming" also takes PDFs and videos.
     const info = TYPES[file.mimetype]
@@ -44,39 +48,50 @@ function kindGuard(req, _res, next) {
 
 const present = (m) => ({ id: m.id, kind: m.kind, name: m.name, type: m.type, url: `/api/media/file/${m.id}` })
 
-router.get('/', (_req, res) => {
-  const rows = db.prepare('SELECT * FROM media ORDER BY id').all()
+router.get('/', async (_req, res) => {
+  const rows = (await media.find().sort({ _id: 1 }).toArray()).map(row)
   res.json({
     heroImages: rows.filter((m) => m.kind === 'hero').map(present),
     upcoming: rows.filter((m) => m.kind === 'upcoming').map(present),
   })
 })
 
-router.get('/file/:id', (req, res) => {
-  const m = db.prepare('SELECT * FROM media WHERE id = ?').get(Number(req.params.id))
+router.get('/file/:id', async (req, res) => {
+  const m = await media.findOne({ _id: Number(req.params.id) })
   if (!m) throw notFound()
   res.type(m.mime)
   res.set('Content-Disposition', 'inline')
+  res.set('X-Content-Type-Options', 'nosniff')
   res.set('Cache-Control', 'private, max-age=3600')
-  res.sendFile(join(config.uploadDir, m.file))
+  const stream = mediaFiles.openDownloadStream(m.file_id)
+  stream.on('error', () => (res.headersSent ? res.destroy() : res.status(404).end()))
+  stream.pipe(res)
 })
 
-router.post('/:kind', requireRole('admin'), kindGuard, upload.array('files', 10), (req, res) => {
+router.post('/:kind', requireRole('admin'), kindGuard, upload.array('files', 10), async (req, res) => {
   if (!req.files?.length) throw badRequest('Choose at least one file.')
-  const insert = db.prepare('INSERT INTO media (kind, name, type, mime, file) VALUES (?, ?, ?, ?, ?)')
-  const created = req.files.map((f) => {
-    const name = Buffer.from(f.originalname, 'latin1').toString('utf8').slice(0, 150)
-    const { lastInsertRowid } = insert.run(req.params.kind, name, TYPES[f.mimetype].type, f.mimetype, f.filename)
-    return present(db.prepare('SELECT * FROM media WHERE id = ?').get(lastInsertRowid))
-  })
+  const created = []
+  for (const f of req.files) {
+    const doc = {
+      _id: await nextId('media'),
+      kind: req.params.kind,
+      name: Buffer.from(f.originalname, 'latin1').toString('utf8').slice(0, 150),
+      type: TYPES[f.mimetype].type,
+      mime: f.mimetype,
+      file_id: f.fileId,
+      created_at: now(),
+    }
+    await media.insertOne(doc)
+    created.push(present(row(doc)))
+  }
   res.status(201).json({ media: created })
 })
 
-router.delete('/:id', requireRole('admin'), (req, res) => {
-  const m = db.prepare('SELECT * FROM media WHERE id = ?').get(Number(req.params.id))
+router.delete('/:id', requireRole('admin'), async (req, res) => {
+  const m = await media.findOne({ _id: Number(req.params.id) })
   if (!m) throw notFound()
-  db.prepare('DELETE FROM media WHERE id = ?').run(m.id)
-  rmSync(join(config.uploadDir, m.file), { force: true })
+  await media.deleteOne({ _id: m._id })
+  await mediaFiles.delete(m.file_id).catch(() => {})
   res.status(204).end()
 })
 

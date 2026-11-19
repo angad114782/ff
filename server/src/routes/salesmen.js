@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { db } from '../db.js'
+import { nextId, now, row, users } from '../db.js'
 import { hashPassword } from '../lib/crypto.js'
 import { badRequest, notFound } from '../lib/errors.js'
 import * as v from '../lib/validate.js'
@@ -7,10 +7,10 @@ import { publicUser } from '../middleware/auth.js'
 
 const router = Router()
 
-const find = (id) => {
-  const row = db.prepare("SELECT * FROM users WHERE id = ? AND role = 'salesman'").get(Number(id))
-  if (!row) throw notFound('Salesman not found.')
-  return row
+const find = async (id) => {
+  const found = row(await users.findOne({ _id: Number(id), role: 'salesman' }))
+  if (!found) throw notFound('Salesman not found.')
+  return found
 }
 
 function fields(body) {
@@ -22,55 +22,54 @@ function fields(body) {
   }
 }
 
-const assertEmailFree = (email, exceptId = 0) => {
-  if (db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email, exceptId)) {
+const assertEmailFree = async (email, exceptId = 0) => {
+  if (await users.findOne({ email, _id: { $ne: exceptId } }, { projection: { _id: 1 } })) {
     throw badRequest('That email is already in use.')
   }
 }
 
-router.get('/', (_req, res) => {
-  const rows = db.prepare("SELECT * FROM users WHERE role = 'salesman' ORDER BY name").all()
-  res.json({ salesmen: rows.map(publicUser) })
+router.get('/', async (_req, res) => {
+  const found = await users.find({ role: 'salesman' }).collation({ locale: 'en', strength: 2 }).sort({ name: 1 }).toArray()
+  res.json({ salesmen: found.map((u) => publicUser(row(u))) })
 })
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const f = fields(req.body)
   const password = v.password(req.body?.password)
-  assertEmailFree(f.email)
-  const { lastInsertRowid } = db
-    .prepare("INSERT INTO users (name, email, phone, branch, role, password_hash) VALUES (?, ?, ?, ?, 'salesman', ?)")
-    .run(f.name, f.email, f.phone, f.branch, hashPassword(password))
-  res.status(201).json({ salesman: publicUser(find(lastInsertRowid)) })
+  await assertEmailFree(f.email)
+  const doc = {
+    _id: await nextId('users'), ...f, role: 'salesman', active: true,
+    password_hash: hashPassword(password), token_version: 0, created_at: now(),
+  }
+  try {
+    await users.insertOne(doc)
+  } catch (err) {
+    if (err.code === 11000) throw badRequest('That email is already in use.')
+    throw err
+  }
+  res.status(201).json({ salesman: publicUser(row(doc)) })
 })
 
-router.put('/:id', (req, res) => {
-  const existing = find(req.params.id)
+router.put('/:id', async (req, res) => {
+  const existing = await find(req.params.id)
   const f = fields(req.body)
-  assertEmailFree(f.email, existing.id)
-  db.prepare('UPDATE users SET name = ?, email = ?, phone = ?, branch = ? WHERE id = ?').run(
-    f.name, f.email, f.phone, f.branch, existing.id,
-  )
-  res.json({ salesman: publicUser(find(existing.id)) })
+  await assertEmailFree(f.email, existing.id)
+  await users.updateOne({ _id: existing.id }, { $set: f })
+  res.json({ salesman: publicUser(await find(existing.id)) })
 })
 
-router.patch('/:id/active', (req, res) => {
-  const existing = find(req.params.id)
+router.patch('/:id/active', async (req, res) => {
+  const existing = await find(req.params.id)
   if (typeof req.body?.active !== 'boolean') throw badRequest('active must be true or false.')
   // Deactivating also bumps token_version so any open session is dropped immediately.
-  db.prepare('UPDATE users SET active = ?, token_version = token_version + 1 WHERE id = ?').run(
-    req.body.active ? 1 : 0,
-    existing.id,
-  )
-  res.json({ salesman: publicUser(find(existing.id)) })
+  await users.updateOne({ _id: existing.id }, { $set: { active: req.body.active }, $inc: { token_version: 1 } })
+  res.json({ salesman: publicUser(await find(existing.id)) })
 })
 
-router.post('/:id/reset-password', (req, res) => {
-  const existing = find(req.params.id)
+router.post('/:id/reset-password', async (req, res) => {
+  const existing = await find(req.params.id)
   const password = v.password(req.body?.password)
-  db.prepare('UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?').run(
-    hashPassword(password),
-    existing.id,
-  )
+  await users.updateOne({ _id: existing.id }, { $set: { password_hash: hashPassword(password) }, $inc: { token_version: 1 } })
   res.json({ ok: true })
 })
 

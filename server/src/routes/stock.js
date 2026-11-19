@@ -10,9 +10,9 @@ const router = Router()
 
 // BC problems are reported to the client without leaking upstream details; admins get the
 // config hint, salesmen are told to contact an admin.
-function bcFailure(err, user) {
+async function bcFailure(err, user) {
   console.error('Business Central error:', err.message)
-  logProblem(user, `Business Central: ${err.message}`)
+  await logProblem(user, `Business Central: ${err.message}`)
   if (err instanceof BcError && err.configIssue) {
     return {
       status: 503,
@@ -44,12 +44,12 @@ router.get('/search', async (req, res) => {
       pageSize,
     })
   } catch (err) {
-    const { status, error } = bcFailure(err, req.user)
+    const { status, error } = await bcFailure(err, req.user)
     return res.status(status).json({ error })
   }
 
   if (req.user.role === 'salesman') {
-    logActivity({ type: 'search', user: req.user, query: scanned || q, found: rows.length > 0 })
+    await logActivity({ type: 'search', user: req.user, query: scanned || q, found: rows.length > 0 })
   }
   // Combined total = our stock + vendor stock. A single match opens the detail page, which does
   // its own vendor lookup, so skip the extra call there.
@@ -77,7 +77,7 @@ router.get('/item/:code', async (req, res) => {
   try {
     rows = await searchStock({ searchText: code, pageSize: 25 })
   } catch (err) {
-    const { status, error } = bcFailure(err, req.user)
+    const { status, error } = await bcFailure(err, req.user)
     return res.status(status).json({ error })
   }
 
@@ -91,7 +91,7 @@ router.get('/item/:code', async (req, res) => {
   // sentence only: vendor names and technical reasons stay with admins.
   item.alerts = []
   if (item.vendor.status === 'error') {
-    logProblem(req.user, item.vendor.message, code)
+    await logProblem(req.user, item.vendor.message, code)
     item.alerts.push(admin ? item.vendor.message : 'Vendor stock could not be checked right now.')
   }
   if (!admin) delete item.vendor.message

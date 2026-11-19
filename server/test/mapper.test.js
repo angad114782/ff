@@ -1,10 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 
-process.env.DATA_DIR = mkdtempSync(join(tmpdir(), 'ff-test-'))
+const { config } = await import('../src/config.js')
+config.encryptionKey = randomBytes(32) // normally loaded from the database by db.js
 const { unwrap } = await import('../src/services/bcApiService.js')
 const { mapItem } = await import('../src/services/stockMapper.js')
 const { encrypt, decrypt, hashPassword, verifyPassword } = await import('../src/lib/crypto.js')

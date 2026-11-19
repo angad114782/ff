@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import multer from 'multer'
+import { rateLimit } from 'express-rate-limit'
 import { config } from './config.js'
 import { bootstrapAdmin } from './db.js'
 import { HttpError } from './lib/errors.js'
@@ -14,8 +15,8 @@ import adminRouter from './routes/admin.js'
 import stockRouter from './routes/stock.js'
 import mediaRouter from './routes/media.js'
 
-export function createApp() {
-  bootstrapAdmin()
+export async function createApp() {
+  await bootstrapAdmin()
 
   const app = express()
   app.disable('x-powered-by')
@@ -43,6 +44,8 @@ export function createApp() {
   app.use(cookieParser())
   app.use(originCheck)
 
+  // Broad safety net against scripted abuse; login and setup have their own, much stricter limits.
+  app.use('/api', rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: 'draft-7', legacyHeaders: false, message: { error: 'Too many requests. Slow down.' } }))
   app.get('/api/health', (_req, res) => res.json({ ok: true }))
   app.use('/api/auth', authRouter)
   app.use('/api/stock', requireAuth, stockRouter)

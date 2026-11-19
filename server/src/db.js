@@ -1,140 +1,120 @@
-import { DatabaseSync } from 'node:sqlite'
-import { join } from 'node:path'
+// MongoDB storage. The only thing that has to be configured in production is MONGODB_URI: the signing
+// and encryption secrets, uploaded media and every setting live in the database itself.
+import { randomBytes } from 'node:crypto'
+import { GridFSBucket, MongoClient } from 'mongodb'
 import { config } from './config.js'
 import { hashPassword } from './lib/crypto.js'
 
-export const db = new DatabaseSync(process.env.DB_FILE ?? join(config.dataDir, 'app.db'))
-
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  PRAGMA foreign_keys = ON;
-  PRAGMA busy_timeout = 5000;
-
-  CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    name          TEXT NOT NULL,
-    email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    phone         TEXT NOT NULL DEFAULT '',
-    role          TEXT NOT NULL CHECK (role IN ('admin', 'salesman')),
-    branch        TEXT NOT NULL DEFAULT '',
-    active        INTEGER NOT NULL DEFAULT 1,
-    password_hash TEXT NOT NULL,
-    token_version INTEGER NOT NULL DEFAULT 0,
-    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS logs (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    type       TEXT NOT NULL CHECK (type IN ('login', 'search', 'reset_request', 'problem')),
-    user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    name       TEXT NOT NULL,
-    email      TEXT NOT NULL,
-    query      TEXT,
-    found      INTEGER,
-    detail     TEXT,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  );
-  CREATE INDEX IF NOT EXISTS logs_created_at ON logs (created_at DESC);
-
-  CREATE TABLE IF NOT EXISTS settings (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-
-  -- One row per vendor API. name matches the vendor name coming from the primary API;
-  -- mapping tells the generic connector where to find stock in that vendor's own response shape.
-  CREATE TABLE IF NOT EXISTS vendors (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    method      TEXT NOT NULL DEFAULT 'GET' CHECK (method IN ('GET', 'POST')),
-    url         TEXT NOT NULL,
-    body        TEXT NOT NULL DEFAULT '',
-    auth_type   TEXT NOT NULL DEFAULT 'none',
-    auth_name   TEXT NOT NULL DEFAULT '',
-    auth_secret TEXT NOT NULL DEFAULT '',
-    mapping     TEXT NOT NULL DEFAULT '{}',
-    active      INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS media (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind       TEXT NOT NULL CHECK (kind IN ('hero', 'upcoming')),
-    name       TEXT NOT NULL,
-    type       TEXT NOT NULL CHECK (type IN ('image', 'video', 'pdf')),
-    mime       TEXT NOT NULL,
-    file       TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-  );
-`)
-
-// Older databases limited vendors.auth_type to the first five kinds; rebuild the table without that limit.
-const vendorsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vendors'").get()?.sql ?? ''
-if (vendorsSql.includes("'basic')")) {
-  db.exec(`
-    BEGIN;
-    ALTER TABLE vendors RENAME TO vendors_old;
-    CREATE TABLE vendors (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      name        TEXT NOT NULL UNIQUE COLLATE NOCASE,
-      method      TEXT NOT NULL DEFAULT 'GET' CHECK (method IN ('GET', 'POST')),
-      url         TEXT NOT NULL,
-      body        TEXT NOT NULL DEFAULT '',
-      auth_type   TEXT NOT NULL DEFAULT 'none',
-      auth_name   TEXT NOT NULL DEFAULT '',
-      auth_secret TEXT NOT NULL DEFAULT '',
-      mapping     TEXT NOT NULL DEFAULT '{}',
-      active      INTEGER NOT NULL DEFAULT 1,
-      created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-    );
-    INSERT INTO vendors SELECT id, name, method, url, body, auth_type, auth_name, auth_secret, mapping, active, created_at FROM vendors_old;
-    DROP TABLE vendors_old;
-    COMMIT;
-  `)
+const uri = process.env.MONGODB_URI ?? process.env.DATABASE_URL
+if (!uri) {
+  console.error('Invalid configuration:\n - MONGODB_URI is required (your MongoDB connection string)')
+  process.exit(1)
 }
 
-// Some vendors need two calls: find the item's id by name, then read stock by that id. `resolve` holds
-// that first step as JSON: { url, match, id } (empty = single call).
-if (!db.prepare('PRAGMA table_info(vendors)').all().some((c) => c.name === 'resolve')) {
-  db.exec("ALTER TABLE vendors ADD COLUMN resolve TEXT NOT NULL DEFAULT ''")
+const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000, appName: 'ff-stock-checker' })
+try {
+  await client.connect()
+} catch (err) {
+  console.error(`Could not connect to MongoDB: ${err.message}`)
+  process.exit(1)
 }
 
-// Older databases have no 'problem' log type / detail column; rebuild logs once to add them.
-const logsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'logs'").get()?.sql ?? ''
-if (logsSql && !logsSql.includes("'problem'")) {
-  db.exec(`
-    BEGIN;
-    DROP INDEX IF EXISTS logs_created_at;
-    ALTER TABLE logs RENAME TO logs_old;
-    CREATE TABLE logs (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      type       TEXT NOT NULL CHECK (type IN ('login', 'search', 'reset_request', 'problem')),
-      user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      name       TEXT NOT NULL,
-      email      TEXT NOT NULL,
-      query      TEXT,
-      found      INTEGER,
-      detail     TEXT,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-    );
-    INSERT INTO logs (id, type, user_id, name, email, query, found, created_at)
-      SELECT id, type, user_id, name, email, query, found, created_at FROM logs_old;
-    DROP TABLE logs_old;
-    CREATE INDEX logs_created_at ON logs (created_at DESC);
-    COMMIT;
-  `)
+// The database name comes from the connection string (".../ff_stock"); default when it has none.
+export const database = client.db(new URL(uri.replace(/^mongodb(\+srv)?:/, 'http:')).pathname.slice(1) || 'ff_stock')
+export const users = database.collection('users')
+export const logs = database.collection('logs')
+export const settings = database.collection('settings')
+export const vendors = database.collection('vendors')
+export const media = database.collection('media')
+export const mediaFiles = new GridFSBucket(database, { bucketName: 'media_files' })
+
+// Numeric ids (1, 2, 3 ...) keep the API and the client exactly as they were with SQL.
+export async function nextId(name) {
+  const doc = await database.collection('counters').findOneAndUpdate(
+    { _id: name },
+    { $inc: { seq: 1 } },
+    { upsert: true, returnDocument: 'after' },
+  )
+  return doc.seq
 }
 
-// First run: create the admin from env. After that the admin manages their own account.
-export function bootstrapAdmin() {
+export const now = () => new Date().toISOString()
+
+// Documents use `_id` as the numeric id; the rest of the app reads `id`.
+export const row = (doc) => (doc ? { ...doc, id: doc._id } : null)
+export const rows = (docs) => docs.map(row)
+
+const ci = { locale: 'en', strength: 2 } // case-insensitive collation
+export const CI = ci
+
+await Promise.all([
+  users.createIndex({ email: 1 }, { unique: true }),
+  users.createIndex({ role: 1 }),
+  logs.createIndex({ created_at: -1 }),
+  logs.createIndex({ type: 1, created_at: -1 }),
+  vendors.createIndex({ name: 1 }, { unique: true, collation: ci }),
+])
+
+// Secrets: taken from the environment when set, otherwise generated once and kept in the database.
+// $setOnInsert makes first start safe even when several instances boot at the same time.
+{
+  await settings.updateOne(
+    { _id: 'secrets' },
+    {
+      $setOnInsert: {
+        value: JSON.stringify({
+          jwtSecret: randomBytes(48).toString('base64'),
+          encryptionKey: randomBytes(32).toString('base64'),
+        }),
+      },
+    },
+    { upsert: true },
+  )
+  const stored = JSON.parse((await settings.findOne({ _id: 'secrets' })).value)
+  config.jwtSecret = process.env.JWT_SECRET ?? stored.jwtSecret
+  config.encryptionKey = Buffer.from(process.env.APP_ENCRYPTION_KEY ?? stored.encryptionKey, 'base64')
+  if (config.jwtSecret.length < 32 || config.encryptionKey.length !== 32) {
+    console.error('Invalid configuration:\n - JWT_SECRET must be 32+ characters and APP_ENCRYPTION_KEY base64 of 32 bytes')
+    process.exit(1)
+  }
+}
+
+export const hasAdmin = async () => Boolean(await users.findOne({ role: 'admin' }, { projection: { _id: 1 } }))
+
+// Creates the first admin. Used by the first-run setup screen and, optionally, ADMIN_EMAIL/ADMIN_PASSWORD.
+// The settings lock makes sure two simultaneous calls can never create two admins.
+export async function createFirstAdmin({ name, email, password }) {
+  if (await hasAdmin()) return null
+  try {
+    await settings.insertOne({ _id: 'first_admin_lock', value: now() })
+  } catch {
+    return null
+  }
+  try {
+    const doc = {
+      _id: await nextId('users'),
+      name,
+      email,
+      phone: '',
+      role: 'admin',
+      branch: '',
+      active: true,
+      password_hash: hashPassword(password),
+      token_version: 0,
+      created_at: now(),
+    }
+    await users.insertOne(doc)
+    return row(doc)
+  } catch (err) {
+    await settings.deleteOne({ _id: 'first_admin_lock' })
+    throw err
+  }
+}
+
+export async function bootstrapAdmin() {
   const { email, password, name } = config.admin
   if (!email || !password) return
-  const exists = db.prepare("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1").get()
-  if (exists) return
-  db.prepare("INSERT INTO users (name, email, role, password_hash) VALUES (?, ?, 'admin', ?)").run(
-    name,
-    email.trim(),
-    hashPassword(password),
-  )
-  console.log(`Created admin account for ${email}`)
+  if (await createFirstAdmin({ name, email: email.trim().toLowerCase(), password })) console.log(`Created admin account for ${email}`)
 }
+
+export const closeDb = () => client.close()

@@ -1,15 +1,34 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+// Tests run against a throwaway local mongod (needs `mongod` on PATH), or MONGODB_TEST_URI if set.
 const dir = mkdtempSync(join(tmpdir(), 'ff-test-'))
-process.env.DATA_DIR = dir
-process.env.DB_FILE = join(dir, 'test.db')
+let mongod
 process.env.ADMIN_EMAIL = 'admin@test.in'
 process.env.ADMIN_PASSWORD = 'admin-pass-123'
 process.env.CLIENT_DIST = join(dir, 'no-client')
+
+async function startMongo() {
+  if (process.env.MONGODB_TEST_URI) return process.env.MONGODB_TEST_URI
+  const port = 28000 + Math.floor(Math.random() * 1000)
+  mongod = spawn('mongod', ['--dbpath', dir, '--port', String(port), '--bind_ip', '127.0.0.1', '--quiet'], { stdio: 'ignore' })
+  const { MongoClient } = await import('mongodb')
+  for (let i = 0; i < 60; i++) {
+    try {
+      const probe = new MongoClient(`mongodb://127.0.0.1:${port}`, { serverSelectionTimeoutMS: 500 })
+      await probe.connect()
+      await probe.close()
+      break
+    } catch {
+      await new Promise((r) => setTimeout(r, 250))
+    }
+  }
+  return `mongodb://127.0.0.1:${port}/ff_test`
+}
 
 const SAMPLE_ROWS = [
   {
@@ -84,16 +103,22 @@ async function call(path, { method = 'GET', body, as = 'admin', headers = {} } =
 }
 
 before(async () => {
+  process.env.MONGODB_URI = await startMongo()
   const { createApp } = await import('../src/app.js')
+  const app = await createApp()
   await new Promise((resolve) => {
-    server = createApp().listen(0, resolve)
+    server = app.listen(0, resolve)
   })
   base = `http://127.0.0.1:${server.address().port}`
 })
 
-after(() => {
+after(async () => {
   server.close()
   globalThis.fetch = realFetch
+  const { closeDb } = await import('../src/db.js')
+  await closeDb()
+  mongod?.kill()
+  await new Promise((r) => setTimeout(r, 300))
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -286,4 +311,16 @@ test('change password invalidates other sessions', async () => {
   assert.equal((await call('/api/auth/me')).status, 200, 'current device stays signed in')
   assert.equal((await call('/api/auth/me', { as: 'admin2' })).json.user, null)
   assert.equal((await call('/api/admin/stats', { as: 'admin2' })).status, 401)
+})
+
+test('first-run setup: closed once an admin exists, rejects non-string input', async () => {
+  const status = await call('/api/auth/setup', { as: 'anon' })
+  assert.equal(status.json.needsSetup, false)
+  const attempt = await call('/api/auth/setup', { method: 'POST', as: 'anon', body: { name: 'X', email: 'x@test.in', password: 'long-enough-pass' } })
+  assert.equal(attempt.status, 403)
+})
+
+test('NoSQL operators in login are rejected, not executed', async () => {
+  const res = await call('/api/auth/login', { method: 'POST', as: 'anon', body: { email: { $ne: null }, password: { $ne: null } } })
+  assert.equal(res.status, 400)
 })

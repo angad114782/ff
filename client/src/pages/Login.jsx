@@ -8,8 +8,9 @@ import logo from '../assets/logo/VerticalLogoLockup-White.svg'
 
 export default function Login() {
   const navigate = useNavigate()
-  const { login, currentUser, ready } = useApp()
-  const [mode, setMode] = useState('login') // 'login' | 'forgot'
+  const { login, currentUser, ready, setCurrentUser } = useApp()
+  const [mode, setMode] = useState('login') // 'login' | 'forgot' | 'setup'
+  const [setupName, setSetupName] = useState('')
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -18,6 +19,24 @@ export default function Login() {
 
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotSent, setForgotSent] = useState(false)
+
+  // First run: with no admin yet, offer the one-time "create admin" step instead of the login form.
+  useEffect(() => {
+    api.get('/api/auth/setup').then((r) => r?.needsSetup && setMode('setup')).catch(() => {})
+  }, [])
+
+  async function handleSetup(e) {
+    e.preventDefault()
+    setSubmitting(true)
+    try {
+      const { user } = await api.post('/api/auth/setup', { name: setupName.trim(), email: email.trim(), password })
+      setCurrentUser(user)
+      navigate(homeFor(user))
+    } catch (err) {
+      setError(err.message)
+      setSubmitting(false)
+    }
+  }
 
   // Already signed in (e.g. reopened the PWA) — skip the form.
   useEffect(() => {
@@ -72,11 +91,42 @@ export default function Login() {
           className="rounded-xl border border-sage-grey bg-linen p-8 shadow-[0_1px_2px_rgba(43,38,32,0.04),0_12px_28px_rgba(43,38,32,0.08)] transition-shadow duration-200"
         >
           <div className="text-center">
-            <p className="font-display text-4xl text-terracotta">Welcome back</p>
-            <p className="mt-2 text-sm text-ink/70">Designed for a life well lived.</p>
+            <p className="font-display text-4xl text-terracotta">{mode === 'setup' ? 'Welcome' : 'Welcome back'}</p>
+            <p className="mt-2 text-sm text-ink/70">
+              {mode === 'setup' ? 'Create the admin account to get started.' : 'Designed for a life well lived.'}
+            </p>
           </div>
 
-          {mode === 'login' ? (
+          {mode === 'setup' ? (
+            <form className="mt-8 space-y-4" onSubmit={handleSetup}>
+              <Input id="setupName" label="Name" value={setupName} onChange={(e) => setSetupName(e.target.value)} required />
+              <Input
+                id="email"
+                label="Email"
+                type="email"
+                placeholder="you@fandf.in"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setError('')
+                }}
+                required
+              />
+              <Input
+                id="password"
+                label="Password (8+ characters)"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                error={error}
+                minLength={8}
+                required
+              />
+              <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting ? 'Creating…' : 'Create admin'}
+              </Button>
+            </form>
+          ) : mode === 'login' ? (
             <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
               <Input
                 id="email"

@@ -3,7 +3,7 @@
 // one normalised result:  { total, breakdown: [{ label, qty }], po: { qty, expected } }.
 import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
-import { db } from '../db.js'
+import { CI, row, vendors } from '../db.js'
 import { memoAsync } from '../lib/memo.js'
 import { TOKEN_TYPES, applyAuth } from './vendorAuth.js'
 
@@ -214,7 +214,7 @@ function vendorMessage(json) {
 // stock by that id. Ids don't change, so they are remembered for 10 minutes.
 export const resolveId = memoAsync(
   async (v, externalItemId) => {
-    const r = JSON.parse(v.resolve)
+    const r = v.resolve
     const json = await callVendor({ ...v, method: 'GET', body: '', url: r.url }, externalItemId)
     const { json: kept } = keepMatchingRows(json, r.match, externalItemId)
     const id = getPath(kept, r.id)
@@ -223,20 +223,20 @@ export const resolveId = memoAsync(
     }
     return String(id)
   },
-  { ttlMs: 600_000, keyOf: (v, id) => `${v.id}|${v.url}|${v.resolve}|${id}`, cacheable: () => true },
+  { ttlMs: 600_000, keyOf: (v, id) => `${v.id}|${v.url}|${JSON.stringify(v.resolve)}|${id}`, cacheable: () => true },
 )
 
 async function fetchVendorStock(vendorName, externalItemId) {
   const name = (vendorName ?? '').trim()
   if (!name || !externalItemId) return NONE
-  const v = db.prepare('SELECT * FROM vendors WHERE name = ? AND active = 1').get(name)
+  const v = row(await vendors.findOne({ name, active: { $ne: false } }, { collation: CI }))
   if (!v) return NONE
 
   const failed = (why) => ({ status: 'error', stock: null, breakdown: [], po: null, message: `${name}: ${why}` })
   try {
     const itemId = v.resolve ? await resolveId(v, externalItemId) : externalItemId
     const json = await callVendor(v, itemId)
-    const result = normalize(json, JSON.parse(v.mapping), itemId)
+    const result = normalize(json, v.mapping ?? {}, itemId)
     if (result.stock === null && !result.breakdown.length) {
       return failed(vendorMessage(json) ?? `no stock was returned for item "${externalItemId}".`)
     }

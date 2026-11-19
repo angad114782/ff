@@ -15,8 +15,8 @@ export class BcError extends Error {
 
 let cachedToken = null // { key, value, expiresAt }
 
-export function isConfigured() {
-  const { tenantId, environment, clientId, clientSecret } = getBcConfig()
+export async function isConfigured() {
+  const { tenantId, environment, clientId, clientSecret } = await getBcConfig()
   return Boolean(tenantId && environment && clientId && clientSecret)
 }
 
@@ -109,8 +109,8 @@ async function post(cfg, payload) {
 
 // `searchText` matches item no / item name / SKU; `qrCode` is for barcode scans.
 async function fetchStock(params) {
-  if (!isConfigured()) throw new BcError('Business Central is not configured.', { configIssue: true })
-  const body = await post(getBcConfig(), { ...EMPTY_SEARCH, ...params })
+  if (!(await isConfigured())) throw new BcError('Business Central is not configured.', { configIssue: true })
+  const body = await post(await getBcConfig(), { ...EMPTY_SEARCH, ...params })
   return unwrap(body)
 }
 

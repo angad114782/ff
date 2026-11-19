@@ -1,6 +1,5 @@
 // Business Central connection settings. Stored in the DB with the client secret encrypted at rest.
 import { config } from '../config.js'
-import { db } from '../db.js'
 import { decrypt, encrypt } from '../lib/crypto.js'
 import { badRequest } from '../lib/errors.js'
 import { str } from '../lib/validate.js'
@@ -8,9 +7,15 @@ import { str } from '../lib/validate.js'
 const KEY = 'bc'
 const FIELDS = ['tenantId', 'environment', 'company', 'clientId']
 
-export function getBcConfig() {
-  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(KEY)
-  const stored = row ? JSON.parse(row.value) : {}
+// Read from the database, kept in memory for a few seconds (it is needed on every BC call).
+let cached = null // { at, stored }
+export async function getBcConfig() {
+  if (!cached || Date.now() - cached.at > 5000) {
+    const { settings } = await import('../db.js') // lazy: keeps pure helpers importable without a database
+    const row = await settings.findOne({ _id: KEY })
+    cached = { at: Date.now(), stored: row ? JSON.parse(row.value) : {} }
+  }
+  const stored = cached.stored
   const { clientSecret: encSecret, ...rest } = stored
   return {
     ...config.bcDefaults,
@@ -26,8 +31,8 @@ export function bcODataRoot({ tenantId, environment }) {
 // tenantId / environment end up in the request URL path, so keep them to safe characters.
 const SAFE = /^[A-Za-z0-9._-]+$/
 
-export function saveBcConfig(patch) {
-  const current = getBcConfig()
+export async function saveBcConfig(patch) {
+  const current = await getBcConfig()
   const next = { ...current }
   for (const f of FIELDS) {
     if (patch[f] === undefined) continue
@@ -44,15 +49,15 @@ export function saveBcConfig(patch) {
   }
 
   const { clientSecret, ...plain } = next
-  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(
-    KEY,
-    JSON.stringify({ ...plain, clientSecret: encrypt(clientSecret) }),
-  )
+  const value = JSON.stringify({ ...plain, clientSecret: encrypt(clientSecret) })
+  const { settings } = await import('../db.js')
+  await settings.updateOne({ _id: KEY }, { $set: { value } }, { upsert: true })
+  cached = null
   return next
 }
 
 // The secret is write-only: responses say whether one is stored, never what it is.
-export function publicBcConfig() {
-  const { clientSecret, ...rest } = getBcConfig()
+export async function publicBcConfig() {
+  const { clientSecret, ...rest } = await getBcConfig()
   return { ...rest, hasClientSecret: Boolean(clientSecret), odataRoot: bcODataRoot(rest) }
 }

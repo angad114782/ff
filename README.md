@@ -4,19 +4,19 @@ React PWA (`client/`) + Express API (`server/`). Stock comes live from Microsoft
 (`TradeApp_API_SearchStock`); the app keeps only its own users, activity logs, uploaded media and the
 BC connection settings (client secret encrypted with AES-256-GCM).
 
-Requires Node 24+ (uses the built-in `node:sqlite`).
+Requires Node 24+ and a MongoDB database (Atlas, or a local `mongod`).
 
 ## Run locally
 
 ```sh
 npm install
-cp server/.env.example server/.env   # set ADMIN_EMAIL / ADMIN_PASSWORD; secrets are auto-generated in dev
+cp server/.env.example server/.env   # set MONGODB_URI (that is the only required setting)
 npm run dev:server                   # API on :4000
 npm run dev:client                   # Vite on :5173, proxies /api to :4000
 npm test                             # API + mapper tests
 ```
 
-Sign in with the `ADMIN_EMAIL` / `ADMIN_PASSWORD` you set, then **API Config -> Primary API** to enter the
+On first visit the site asks you to create the admin account. Then **API Config -> Primary API** to enter the
 Business Central Tenant ID, Environment, Company, Client ID and Secret and press *Test Connection*.
 
 ## Production
@@ -25,15 +25,16 @@ The server serves the built client, so it is one process behind HTTPS (session c
 
 ```sh
 docker build -t ff-stock .
-docker run -d --name ff-stock -p 4000:4000 -v ff-data:/data --env-file server/.env ff-stock
+docker run -d --name ff-stock -p 4000:4000 -e MONGODB_URI='mongodb+srv://…' ff-stock
 ```
 
-Required env: `JWT_SECRET`, `APP_ENCRYPTION_KEY`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` (see `server/.env.example`).
-The server refuses to start in production without them. Put it behind a TLS-terminating proxy and set
-`TRUST_PROXY=1`.
+**`MONGODB_URI` is the only required setting.** Session/encryption secrets are generated and stored in the
+database, uploaded media is stored in the database (GridFS), and the Business Central and vendor settings are
+entered in the admin UI. The first visit shows a one-time "create admin" screen.
 
-- **Back up the data volume** (`/data`: `app.db` + `uploads/`). Keep `APP_ENCRYPTION_KEY` safe; without it the stored BC secret cannot be decrypted (re-enter it in API Config).
-- Changing `JWT_SECRET` signs everyone out.
+- Put it behind a TLS-terminating proxy (hosting platforms do this for you). `TRUST_PROXY` defaults to `1` in production.
+- **Back up the database.** Secrets live in it too (collection `settings`, `_id: "secrets"`). To keep the encryption key out of the database, set `APP_ENCRYPTION_KEY` (and `JWT_SECRET`) as env vars instead.
+- Moving from the old SQLite version: `MONGODB_URI=… node server/scripts/migrate-sqlite.js server/data/app.db server/data/uploads`.
 - Health check: `GET /api/health`.
 
 ## Roles
