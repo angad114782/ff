@@ -1,57 +1,78 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Input } from '../components/ui'
-import { adminProfile } from '../mock/data'
+import { api } from '../api'
 import { useApp } from '../context/AppContext'
+import { homeFor } from '../components/RequireRole'
 import logo from '../assets/logo/VerticalLogoLockup-White.svg'
 
 export default function Login() {
   const navigate = useNavigate()
-  const { login, salesmen } = useApp()
-  const [mode, setMode] = useState('login') // 'login' | 'forgot'
+  const { login, currentUser, ready, setCurrentUser } = useApp()
+  const [mode, setMode] = useState('login') // 'login' | 'forgot' | 'setup'
+  const [setupName, setSetupName] = useState('')
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotSent, setForgotSent] = useState(false)
 
-  function handleSubmit(e) {
-    e.preventDefault()
-    const normalized = email.trim().toLowerCase()
+  // First run: with no admin yet, offer the one-time "create admin" step instead of the login form.
+  useEffect(() => {
+    api.get('/api/auth/setup').then((r) => r?.needsSetup && setMode('setup')).catch(() => {})
+  }, [])
 
-    // TODO: replace with a real POST /api/auth/login once the Express backend exists —
-    // the server should look up the account and return its role, not the client.
-    if (normalized === adminProfile.email.toLowerCase()) {
-      login({ name: adminProfile.name, email: adminProfile.email, role: 'admin' })
-      navigate('/admin')
-      return
+  async function handleSetup(e) {
+    e.preventDefault()
+    setSubmitting(true)
+    try {
+      const { user } = await api.post('/api/auth/setup', { name: setupName.trim(), email: email.trim(), password })
+      setCurrentUser(user)
+      navigate(homeFor(user))
+    } catch (err) {
+      setError(err.message)
+      setSubmitting(false)
     }
-    const salesman = salesmen.find((s) => s.email.toLowerCase() === normalized)
-    if (salesman) {
-      if (!salesman.active) {
-        setError('This account has been deactivated. Contact your admin.')
-        return
-      }
-      login({ name: salesman.name, email: salesman.email, role: 'salesman', branch: salesman.branch })
-      navigate('/salesman')
-      return
-    }
-    setError('No account found for this email.')
   }
 
-  function handleForgotSubmit(e) {
+  // Already signed in (e.g. reopened the PWA) — skip the form.
+  useEffect(() => {
+    if (ready && currentUser) navigate(homeFor(currentUser), { replace: true })
+  }, [ready, currentUser, navigate])
+
+  async function handleSubmit(e) {
     e.preventDefault()
-    // TODO: replace with a real POST /api/auth/forgot-password once the backend exists —
-    // always show the same message regardless of match, to avoid leaking which emails exist.
-    setForgotSent(true)
+    setSubmitting(true)
+    try {
+      const user = await login(email.trim(), password)
+      navigate(homeFor(user))
+    } catch (err) {
+      setError(err.message)
+      setSubmitting(false)
+    }
+  }
+
+  async function handleForgotSubmit(e) {
+    e.preventDefault()
+    setSubmitting(true)
+    try {
+      await api.post('/api/auth/forgot-password', { email: forgotEmail.trim() })
+      setForgotSent(true)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   function backToLogin() {
     setMode('login')
     setForgotEmail('')
     setForgotSent(false)
+    setError('')
   }
 
   return (
@@ -70,11 +91,42 @@ export default function Login() {
           className="rounded-xl border border-sage-grey bg-linen p-8 shadow-[0_1px_2px_rgba(43,38,32,0.04),0_12px_28px_rgba(43,38,32,0.08)] transition-shadow duration-200"
         >
           <div className="text-center">
-            <p className="font-display text-4xl text-terracotta">Welcome back</p>
-            <p className="mt-2 text-sm text-ink/70">Designed for a life well lived.</p>
+            <p className="font-display text-4xl text-terracotta">{mode === 'setup' ? 'Welcome' : 'Welcome back'}</p>
+            <p className="mt-2 text-sm text-ink/70">
+              {mode === 'setup' ? 'Create the admin account to get started.' : 'Designed for a life well lived.'}
+            </p>
           </div>
 
-          {mode === 'login' ? (
+          {mode === 'setup' ? (
+            <form className="mt-8 space-y-4" onSubmit={handleSetup}>
+              <Input id="setupName" label="Name" value={setupName} onChange={(e) => setSetupName(e.target.value)} required />
+              <Input
+                id="email"
+                label="Email"
+                type="email"
+                placeholder="you@fandf.in"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setError('')
+                }}
+                required
+              />
+              <Input
+                id="password"
+                label="Password (8+ characters)"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                error={error}
+                minLength={8}
+                required
+              />
+              <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting ? 'Creating…' : 'Create admin'}
+              </Button>
+            </form>
+          ) : mode === 'login' ? (
             <form className="mt-8 space-y-4" onSubmit={handleSubmit}>
               <Input
                 id="email"
@@ -101,22 +153,25 @@ export default function Login() {
               <div className="text-right">
                 <button
                   type="button"
-                  onClick={() => setMode('forgot')}
+                  onClick={() => {
+                    setMode('forgot')
+                    setError('')
+                  }}
                   className="text-sm font-medium text-terracotta transition-colors hover:text-terracotta-deep hover:underline"
                 >
                   Forgot password?
                 </button>
               </div>
-              <Button type="submit" className="w-full">
-                Log in
+              <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting ? 'Signing in…' : 'Log in'}
               </Button>
             </form>
           ) : (
             <div className="mt-8 space-y-4">
               {forgotSent ? (
                 <p className="rounded-lg border border-sage-grey bg-sand/40 p-3 text-sm text-ink">
-                  If an account exists for <span className="font-medium">{forgotEmail}</span>, a password reset
-                  link has been sent.
+                  If an account exists for <span className="font-medium">{forgotEmail}</span>, your admin has been
+                  notified and will set a new password for you.
                 </p>
               ) : (
                 <form className="space-y-4" onSubmit={handleForgotSubmit}>
@@ -126,11 +181,15 @@ export default function Login() {
                     type="email"
                     placeholder="you@fandf.in"
                     value={forgotEmail}
-                    onChange={(e) => setForgotEmail(e.target.value)}
+                    onChange={(e) => {
+                      setForgotEmail(e.target.value)
+                      setError('')
+                    }}
+                    error={error}
                     required
                   />
-                  <Button type="submit" className="w-full">
-                    Send Reset Link
+                  <Button type="submit" className="w-full" disabled={submitting}>
+                    Request Password Reset
                   </Button>
                 </form>
               )}

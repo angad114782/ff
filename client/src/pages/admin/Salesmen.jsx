@@ -1,14 +1,17 @@
 import { useState } from 'react'
+import { api } from '../../api'
+import { useFetch } from '../../hooks/useFetch'
 import { Card, Table, Button, Modal, Input, Badge, Toggle, TableSkeleton } from '../../components/ui'
-import { useApp } from '../../context/AppContext'
-import { useLoading } from '../../hooks/useLoading'
 
-const emptyForm = { name: '', email: '', phone: '', branch: '' }
+const emptyForm = { name: '', email: '', phone: '', branch: '', password: '' }
 const emptyResetForm = { password: '', confirm: '' }
 
 export default function Salesmen() {
-  const { salesmen, setSalesmen } = useApp()
-  const isLoading = useLoading()
+  const { data, loading: isLoading, error: loadError, reload } = useFetch('/api/admin/salesmen')
+  const salesmen = data?.salesmen ?? []
+  const [formError, setFormError] = useState('')
+  const [pageError, setPageError] = useState('')
+  const [busy, setBusy] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -22,12 +25,14 @@ export default function Salesmen() {
   function openAdd() {
     setEditingId(null)
     setForm(emptyForm)
+    setFormError('')
     setModalOpen(true)
   }
 
   function openEdit(salesman) {
     setEditingId(salesman.id)
-    setForm(salesman)
+    setForm({ ...emptyForm, name: salesman.name, email: salesman.email, phone: salesman.phone, branch: salesman.branch })
+    setFormError('')
     setModalOpen(true)
   }
 
@@ -35,20 +40,30 @@ export default function Salesmen() {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }))
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
-    if (editingId) {
-      setSalesmen((list) => list.map((s) => (s.id === editingId ? { ...s, ...form, id: editingId } : s)))
-    } else {
-      setSalesmen((list) => [...list, { ...form, id: Date.now(), active: true }])
+    setBusy(true)
+    setFormError('')
+    try {
+      if (editingId) await api.put(`/api/admin/salesmen/${editingId}`, form)
+      else await api.post('/api/admin/salesmen', form)
+      setModalOpen(false)
+      reload()
+    } catch (err) {
+      setFormError(err.message)
+    } finally {
+      setBusy(false)
     }
-    setModalOpen(false)
   }
 
-  function handleToggleActive(id, nextActive) {
-    // TODO: wire up to PATCH /api/admin/salesmen/:id once the backend exists —
-    // an inactive salesman should be blocked from logging in server-side too.
-    setSalesmen((list) => list.map((s) => (s.id === id ? { ...s, active: nextActive } : s)))
+  async function handleToggleActive(id, nextActive) {
+    setPageError('')
+    try {
+      await api.patch(`/api/admin/salesmen/${id}/active`, { active: nextActive })
+      reload()
+    } catch (err) {
+      setPageError(err.message)
+    }
   }
 
   function openReset(salesman) {
@@ -66,18 +81,22 @@ export default function Salesmen() {
     }
   }
 
-  function handleResetSubmit(e) {
+  async function handleResetSubmit(e) {
     e.preventDefault()
-    if (resetForm.password.length < 6) {
-      setResetError('Password must be at least 6 characters.')
+    if (resetForm.password.length < 8) {
+      setResetError('Password must be at least 8 characters.')
       return
     }
     if (resetForm.password !== resetForm.confirm) {
       setResetError('Passwords do not match.')
       return
     }
-    // TODO: wire up to POST /api/admin/salesmen/:id/reset-password once the backend exists.
-    setResetSuccess(true)
+    try {
+      await api.post(`/api/admin/salesmen/${resetTarget.id}/reset-password`, { password: resetForm.password })
+      setResetSuccess(true)
+    } catch (err) {
+      setResetError(err.message)
+    }
   }
 
   const columns = [
@@ -133,8 +152,10 @@ export default function Salesmen() {
         <Button onClick={openAdd}>Add Salesman</Button>
       </div>
 
+      {(pageError || loadError) && <p className="text-sm text-terracotta-deep">{pageError || loadError}</p>}
+
       <Card>
-        {isLoading ? (
+        {isLoading && !data ? (
           <TableSkeleton columns={5} rows={3} />
         ) : (
           <Table columns={columns} rows={salesmen} emptyMessage="No salesmen added yet." />
@@ -147,11 +168,25 @@ export default function Salesmen() {
           <Input id="email" label="Email" type="email" value={form.email} onChange={update('email')} required />
           <Input id="phone" label="Phone" value={form.phone} onChange={update('phone')} required />
           <Input id="branch" label="Branch" value={form.branch} onChange={update('branch')} required />
+          {!editingId && (
+            <Input
+              id="initialPassword"
+              label="Initial Password"
+              type="password"
+              minLength={8}
+              value={form.password}
+              onChange={update('password')}
+              required
+            />
+          )}
+          {formError && <p className="text-sm text-terracotta-deep">{formError}</p>}
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit">{editingId ? 'Save Changes' : 'Add Salesman'}</Button>
+            <Button type="submit" disabled={busy}>
+              {editingId ? 'Save Changes' : 'Add Salesman'}
+            </Button>
           </div>
         </form>
       </Modal>

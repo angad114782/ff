@@ -1,99 +1,39 @@
-import { createContext, useContext, useEffect, useState } from 'react'
-import { seedLogs, salesmen as seedSalesmen } from '../mock/data'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { api } from '../api'
 
 const AppContext = createContext(null)
 
-const USER_KEY = 'ff_current_user'
-const LOGS_KEY = 'ff_activity_logs'
-const SALESMEN_KEY = 'ff_salesmen'
-const HERO_IMAGES_KEY = 'ff_hero_images'
-const UPCOMING_MEDIA_KEY = 'ff_upcoming_pdfs'
-
-function loadJSON(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw ? JSON.parse(raw) : fallback
-  } catch {
-    return fallback
-  }
-}
-
 export function AppProvider({ children }) {
-  const [currentUser, setCurrentUser] = useState(() => loadJSON(USER_KEY, null))
-  const [logs, setLogs] = useState(() => loadJSON(LOGS_KEY, seedLogs))
-  const [salesmen, setSalesmen] = useState(() => loadJSON(SALESMEN_KEY, seedSalesmen))
-  const [heroImages, setHeroImages] = useState(() => loadJSON(HERO_IMAGES_KEY, []))
-  const [upcomingMedia, setUpcomingMedia] = useState(() => loadJSON(UPCOMING_MEDIA_KEY, []))
-  const [storageError, setStorageError] = useState('')
+  const [currentUser, setCurrentUser] = useState(null)
+  const [ready, setReady] = useState(false) // false until the existing session has been checked
 
   useEffect(() => {
-    if (currentUser) localStorage.setItem(USER_KEY, JSON.stringify(currentUser))
-    else localStorage.removeItem(USER_KEY)
-  }, [currentUser])
+    api
+      .get('/api/auth/me')
+      .then(({ user }) => setCurrentUser(user ?? null))
+      .catch(() => {})
+      .finally(() => setReady(true))
+  }, [])
 
   useEffect(() => {
-    localStorage.setItem(LOGS_KEY, JSON.stringify(logs))
-  }, [logs])
+    const onUnauthorized = () => setCurrentUser(null)
+    window.addEventListener('ff:unauthorized', onUnauthorized)
+    return () => window.removeEventListener('ff:unauthorized', onUnauthorized)
+  }, [])
 
-  useEffect(() => {
-    localStorage.setItem(SALESMEN_KEY, JSON.stringify(salesmen))
-  }, [salesmen])
-
-  // Hero images/PDFs are stored as data URIs, which can be large enough to hit
-  // the browser's localStorage quota — this is a mock-data prototype with no
-  // real file storage backend, so surface that instead of crashing silently.
-  useEffect(() => {
-    try {
-      localStorage.setItem(HERO_IMAGES_KEY, JSON.stringify(heroImages))
-    } catch {
-      setStorageError('Could not save — the uploaded images are too large for local storage.')
-    }
-  }, [heroImages])
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(UPCOMING_MEDIA_KEY, JSON.stringify(upcomingMedia))
-    } catch {
-      setStorageError('Could not save — the uploaded file is too large for local storage.')
-    }
-  }, [upcomingMedia])
-
-  function addLog(entry) {
-    setLogs((list) => [{ id: `${Date.now()}-${Math.random()}`, timestamp: new Date().toISOString(), ...entry }, ...list])
-  }
-
-  function login(user) {
+  const login = useCallback(async (email, password) => {
+    const { user } = await api.post('/api/auth/login', { email, password })
     setCurrentUser(user)
-    // Only salesman activity is tracked in the Logs screen per the product spec.
-    if (user.role === 'salesman') {
-      addLog({ type: 'login', name: user.name, email: user.email })
-    }
-  }
+    return user
+  }, [])
 
-  function logout() {
+  const logout = useCallback(async () => {
+    await api.post('/api/auth/logout').catch(() => {})
     setCurrentUser(null)
-  }
+  }, [])
 
   return (
-    <AppContext.Provider
-      value={{
-        currentUser,
-        login,
-        logout,
-        logs,
-        addLog,
-        salesmen,
-        setSalesmen,
-        heroImages,
-        setHeroImages,
-        upcomingMedia,
-        setUpcomingMedia,
-        storageError,
-        setStorageError,
-      }}
-    >
-      {children}
-    </AppContext.Provider>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, ready, login, logout }}>{children}</AppContext.Provider>
   )
 }
 

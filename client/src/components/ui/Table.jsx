@@ -1,4 +1,7 @@
-export default function Table({ columns, rows, emptyMessage = 'No records found.' }) {
+// Clicks on buttons, switches and fields inside a row belong to them, not to the row.
+const INTERACTIVE = 'button, a, input, select, textarea, label, [role="switch"]'
+
+export default function Table({ columns, rows, emptyMessage = 'No records found.', onRowClick }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-sage-grey">
       <table className="w-full text-left text-sm">
@@ -22,7 +25,14 @@ export default function Table({ columns, rows, emptyMessage = 'No records found.
             rows.map((row, i) => (
               <tr
                 key={row.id ?? i}
-                className={`border-b border-sage-grey/60 transition-colors duration-150 last:border-b-0 hover:bg-sand/50 ${
+                onClick={onRowClick ? (e) => !e.target.closest(INTERACTIVE) && onRowClick(row) : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (e) => e.key === 'Enter' && e.target === e.currentTarget && onRowClick(row)
+                    : undefined
+                }
+                tabIndex={onRowClick ? 0 : undefined}
+                className={`${onRowClick ? 'cursor-pointer ' : ''}border-b border-sage-grey/60 transition-colors duration-150 last:border-b-0 hover:bg-sand/50 ${
                   i % 2 === 1 ? 'bg-sage-grey/10' : ''
                 }`}
               >

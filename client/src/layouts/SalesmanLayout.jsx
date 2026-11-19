@@ -51,8 +51,8 @@ export default function SalesmanLayout() {
     setDrawerVisible(false)
   }, [menuOpen])
 
-  function handleLogout() {
-    logout()
+  async function handleLogout() {
+    await logout()
     navigate('/')
   }
 
