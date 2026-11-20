@@ -7,8 +7,8 @@ import { CI, row, vendors } from '../db.js'
 import { memoAsync } from '../lib/memo.js'
 import { TOKEN_TYPES, applyAuth } from './vendorAuth.js'
 
-const TIMEOUT_MS = 8000
-const MAX_BYTES = 1_000_000
+const TIMEOUT_MS = 20_000
+const MAX_BYTES = 25_000_000 // some vendors return their whole catalogue in one reply
 const NONE = { status: 'not_configured', stock: null, breakdown: [], po: null }
 
 // ---------- response mapping ----------
@@ -226,6 +226,17 @@ export const resolveId = memoAsync(
   { ttlMs: 600_000, keyOf: (v, id) => `${v.id}|${v.url}|${JSON.stringify(v.resolve)}|${id}`, cacheable: () => true },
 )
 
+// A vendor whose address and body never mention the item returns the same catalogue for every item,
+// so one copy is shared for 15 minutes instead of re-downloading it on each search.
+const sharedReply = memoAsync((v) => callVendor(v), {
+  ttlMs: 900_000,
+  max: 20,
+  keyOf: (v) => `${v.id}|${v.url}|${v.body ?? ''}|${v.updated_at ?? ''}`,
+  cacheable: () => true,
+})
+const callVendorForStock = (v, itemId) =>
+  /\{\{\s*externalItemId\s*\}\}/.test(`${v.url}${v.body ?? ''}`) ? callVendor(v, itemId) : sharedReply(v)
+
 async function fetchVendorStock(vendorName, externalItemId) {
   const name = (vendorName ?? '').trim()
   if (!name || !externalItemId) return NONE
@@ -235,7 +246,7 @@ async function fetchVendorStock(vendorName, externalItemId) {
   const failed = (why) => ({ status: 'error', stock: null, breakdown: [], po: null, message: `${name}: ${why}` })
   try {
     const itemId = v.resolve ? await resolveId(v, externalItemId) : externalItemId
-    const json = await callVendor(v, itemId)
+    const json = await callVendorForStock(v, itemId)
     const result = normalize(json, v.mapping ?? {}, itemId)
     if (result.stock === null && !result.breakdown.length) {
       return failed(vendorMessage(json) ?? `no stock was returned for item "${externalItemId}".`)
