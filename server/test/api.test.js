@@ -324,3 +324,63 @@ test('NoSQL operators in login are rejected, not executed', async () => {
   const res = await call('/api/auth/login', { method: 'POST', as: 'anon', body: { email: { $ne: null }, password: { $ne: null } } })
   assert.equal(res.status, 400)
 })
+
+
+// Real reply shapes of the connected vendors, mapped the way the admin maps them.
+
+test('RR Decor detail reply: total, lots with location, image', async () => {
+  const { normalize, keepMatchingRows } = await import('../src/services/vendorConnector.js')
+  const json = {
+    data: {
+      fabric: { id: 15919, name: 'KAYA INDIAN RED', images: [{ url: 'https://rrdecor.webav.store/x.jpg' }] },
+      availability: {
+        current_available_meters: '74.500',
+        projected_available_meters: '0.000',
+        lot_stock: [
+          { lot_number: 'DM 20347', location_code: 'F-28/04', available_meters: '10.000' },
+          { lot_number: 'DM 20348', location_code: 'F-28/05', available_meters: '64.500' },
+        ],
+      },
+    },
+  }
+  const r = normalize(json, {
+    total: 'data.availability.current_available_meters',
+    list: 'data.availability.lot_stock', label: 'lot_number', location: 'location_code', qty: 'available_meters',
+    poQty: 'data.availability.projected_available_meters', image: 'data.fabric.images[0].url',
+  }, '15919')
+  assert.equal(r.stock, 74.5)
+  assert.deepEqual(r.breakdown.map((b) => [b.label, b.location, b.qty]), [['DM 20347', 'F-28/04', 10], ['DM 20348', 'F-28/05', 64.5]])
+  assert.equal(r.image, 'https://rrdecor.webav.store/x.jpg')
+})
+
+test('Universal: whole catalogue, rows picked by Pattern, rolls become lots', async () => {
+  const { normalize, keepMatchingRows } = await import('../src/services/vendorConnector.js')
+  const json = {
+    status: 'TRUE',
+    return_field_value: [
+      { PcSINo: 'V-1', Length: '12.5', Pattern: 'Aarjavam', Color: 'Indigo' },
+      { PcSINo: 'V-2', Length: '7', Pattern: 'aarjavam', Color: 'Red' },
+      { PcSINo: 'V-3', Length: '9', Pattern: 'Aarya', Color: 'Hazelnut' },
+    ],
+  }
+  const mapping = { match: 'return_field_value[0].Pattern', list: 'return_field_value', label: 'PcSINo', qty: 'Length' }
+  const r = normalize(json, mapping, 'Aarjavam')
+  assert.equal(r.stock, 19.5)
+  assert.deepEqual(r.breakdown.map((b) => b.label), ['V-1', 'V-2'])
+  assert.equal(normalize(json, mapping, 'Nothing').matched, false)
+})
+
+test('Asian Paints: total from the first bucket, rows are buckets', async () => {
+  const { normalize, keepMatchingRows } = await import('../src/services/vendorConnector.js')
+  const json = { BUCKET_DETAILS: [{ TOTAL_STOCK: '40', NO_OF_PIECE: '3' }, { TOTAL_STOCK: '40', NO_OF_PIECE: '2' }] }
+  const r = normalize(json, { total: 'BUCKET_DETAILS[0].TOTAL_STOCK', list: 'BUCKET_DETAILS', qty: 'NO_OF_PIECE' }, 'x')
+  assert.equal(r.stock, 40)
+  assert.equal(r.breakdown.length, 2)
+})
+
+test('an Item ID mapped to a non-list field is ignored, not an error', async () => {
+  const { normalize, keepMatchingRows } = await import('../src/services/vendorConnector.js')
+  const json = { data: { fabric: { id: 1 }, availability: { current_available_meters: 5 } } }
+  assert.deepEqual(keepMatchingRows(json, 'data.fabric.id', '1'), { json, matched: null })
+  assert.equal(normalize(json, { match: 'data.fabric.id', total: 'data.availability.current_available_meters' }, '1').stock, 5)
+})
