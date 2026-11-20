@@ -94,6 +94,14 @@ router.get('/item/:code', async (req, res) => {
     await logProblem(req.user, item.vendor.message, code)
     item.alerts.push(admin ? item.vendor.message : 'Vendor stock could not be checked right now.')
   }
+  // Admins are told why no vendor stock was looked up, instead of seeing a silent zero.
+  if (admin && item.vendor.status === 'not_configured') {
+    const vName = String(row.PrimaryVendorName ?? '').trim()
+    const vId = String(row.ExternalItemId ?? '').trim()
+    if (!vName) item.alerts.push('Vendor stock not checked: this item has no PrimaryVendorName in the primary API.')
+    else if (!vId) item.alerts.push(`Vendor stock not checked: this item has no ExternalItemId (vendor "${vName}").`)
+    else item.alerts.push(`Vendor stock not checked: no active vendor named "${vName}" is set up in Vendors (ExternalItemId "${vId}").`)
+  }
   if (!admin) delete item.vendor.message
   item.totalStock = Math.round((item.stock.current + (item.vendor.status === 'ok' ? item.vendor.stock ?? 0 : 0)) * 100) / 100
   if (item.vendor.status === 'ok' && (item.vendor.stock ?? 0) > 0) item.status = 'in_stock'
