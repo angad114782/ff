@@ -1,0 +1,12 @@
+{
+  "name": "Universal Textile Mills",
+  "method": "GET",
+  "url": "PASTE-THE-FULL-STOCK-URL-HERE",
+  "authType": "bearer",
+  "mapping": {
+    "match": "return_field_value[0].Pattern",
+    "list": "return_field_value",
+    "label": "PcSINo",
+    "qty": "Length"
+  }
+}
