@@ -5,7 +5,7 @@ import { useRef, useState } from 'react'
 // The saved mapping keeps its shape ({ match, total, list, label, qty, poQty, poExpected }).
 
 const TARGETS = [
-  { key: 'match', label: 'Item ID', primary: 'ExternalItemId', hint: 'Only if the response lists many items', inList: true },
+  { key: 'match', label: 'Item ID', primary: 'ExternalItemId', hint: 'Only needed if the response lists many items' },
   { key: 'total', label: 'Total stock', primary: 'QtyFree', hint: 'Optional, otherwise rows are added up', numeric: true },
   { key: 'label', label: 'Row name', primary: 'lots[].lotNo / locationCode', hint: 'e.g. lot, warehouse or city', inList: true },
   { key: 'qty', label: 'Row quantity', primary: 'lots[].quantity', hint: 'Stock in each row', numeric: true, inList: true },
