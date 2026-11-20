@@ -20,6 +20,7 @@ const present = (r) => ({
   ...publicAuth(r),
   hasSecret: Boolean(r.auth_secret),
   mapping: r.mapping ?? {},
+  resolve: r.resolve ?? null,
   active: r.active !== false,
 })
 
@@ -49,6 +50,19 @@ function parse(body, existing) {
 
   const auth = packAuth(authType, body, existing)
 
+  // Optional first call: search by the item's name to get the vendor's own id, then read stock by that id.
+  let resolve = null
+  const r = body?.resolve
+  if (r && typeof r.url === 'string' && r.url.trim()) {
+    const rUrl = v.str(r.url, 'Search address', { max: 500 })
+    if (!/^https?:\/\//i.test(rUrl)) throw badRequest('The search address must start with https://')
+    const idPath = typeof r.id === 'string' ? r.id.trim() : ''
+    const matchPath = typeof r.match === 'string' ? r.match.trim() : ''
+    if (!idPath) throw badRequest('Enter the field that holds the vendor id in the search reply.')
+    for (const val of [idPath, matchPath]) if (val && !isValidPath(val)) throw badRequest(`"${val}" is not a valid field path.`)
+    resolve = { url: rUrl, id: idPath, ...(matchPath ? { match: matchPath } : {}) }
+  }
+
   return {
     name: v.str(body?.name, 'Vendor name', { max: 120 }),
     method,
@@ -58,7 +72,7 @@ function parse(body, existing) {
     auth_name: auth.auth_name,
     auth_secret: auth.auth_secret,
     mapping,
-    resolve: existing?.resolve ?? null,
+    resolve,
   }
 }
 

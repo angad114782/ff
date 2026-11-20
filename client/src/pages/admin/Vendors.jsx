@@ -22,6 +22,7 @@ const emptyForm = {
     scope: '',
     headers: [{ name: '', value: '' }],
   },
+  resolve: { url: '', match: '', id: '' },
   mapping: { match: '', total: '', list: '', label: '', qty: '', poQty: '', poExpected: '' },
 }
 
@@ -85,6 +86,7 @@ export default function Vendors() {
             authSecret: '',
             authConfig: { ...emptyForm.authConfig, ...vendor.authConfig, headers: vendor.authConfig?.headers?.length ? vendor.authConfig.headers : emptyForm.authConfig.headers },
             mapping: { ...emptyForm.mapping, ...vendor.mapping },
+            resolve: { ...emptyForm.resolve, ...vendor.resolve },
           }
         : emptyForm,
     )
@@ -430,8 +432,40 @@ export default function Vendors() {
 
               </div>
               <div className="space-y-5">
+              <section className="space-y-3">
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-ink/60">3 · Find the vendor's ID first (optional)</h4>
+                <p className="text-xs text-ink/60">
+                  Only if their stock address needs their own id and not the item name. We search by name first, take the id from the reply, then call the stock address below with that id (write <code className="rounded bg-sand px-1">{'{{externalItemId}}'}</code> there).
+                </p>
+                <Input
+                  id="vResolveUrl"
+                  label="Search address (name goes in {{externalItemId}})"
+                  placeholder="https://api.vendor.com/fabrics?search={{externalItemId}}"
+                  value={form.resolve.url}
+                  onChange={(e) => setForm((f) => ({ ...f, resolve: { ...f.resolve, url: e.target.value } }))}
+                />
+                {form.resolve.url.trim() && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Input
+                      id="vResolveMatch"
+                      label="Name field (to pick the right row)"
+                      placeholder="data.fabrics[0].name"
+                      value={form.resolve.match}
+                      onChange={(e) => setForm((f) => ({ ...f, resolve: { ...f.resolve, match: e.target.value } }))}
+                    />
+                    <Input
+                      id="vResolveId"
+                      label="Id field"
+                      placeholder="data.fabrics[0].id"
+                      value={form.resolve.id}
+                      onChange={(e) => setForm((f) => ({ ...f, resolve: { ...f.resolve, id: e.target.value } }))}
+                    />
+                  </div>
+                )}
+              </section>
+
               <section className="space-y-4">
-                <h4 className="text-sm font-semibold uppercase tracking-wide text-ink/60">3 · Stock check (this reply is matched)</h4>
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-ink/60">4 · Stock check (this reply is matched)</h4>
                 <div className="grid gap-4 sm:grid-cols-[8rem_1fr]">
                   <Select id="vMethod" label="Type" value={form.method} onChange={update('method')}>
                     <option value="GET">GET</option>
@@ -469,7 +503,7 @@ export default function Vendors() {
               </section>
 
               <section className="space-y-3">
-                <h4 className="text-sm font-semibold uppercase tracking-wide text-ink/60">4 · Try it</h4>
+                <h4 className="text-sm font-semibold uppercase tracking-wide text-ink/60">5 · Try it</h4>
                 <div className="flex gap-3">
                   <Input
                     id="vSample"
