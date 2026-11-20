@@ -8,16 +8,19 @@ const TARGETS = [
   { key: 'match', label: 'Item ID', primary: 'ExternalItemId', hint: 'Only needed if the response lists many items' },
   { key: 'total', label: 'Total stock', primary: 'QtyFree', hint: 'Optional, otherwise rows are added up', numeric: true },
   { key: 'label', label: 'Row name', primary: 'lots[].lotNo / locationCode', hint: 'e.g. lot, warehouse or city', inList: true },
+  { key: 'location', label: 'Row location', primary: 'locationCode', hint: 'Optional, shown in the Loc column', inList: true },
   { key: 'qty', label: 'Row quantity', primary: 'lots[].quantity', hint: 'Stock in each row', numeric: true, inList: true },
   { key: 'poQty', label: 'PO quantity', primary: 'QtyPO', hint: 'Optional', numeric: true },
   { key: 'poExpected', label: 'PO expected date', primary: 'DeliveryDate', hint: 'Optional' },
+  { key: 'image', label: 'Image', primary: 'images[0]', hint: 'Optional, a https picture address' },
 ]
 
 const ROW = '[0].'
 const fromRoot = (list, rel) => (list === '$' ? `${ROW}${rel}` : `${list}${ROW}${rel}`)
 
 function toSlots(m) {
-  const slots = { match: m.match, total: m.total, poQty: m.poQty, poExpected: m.poExpected }
+  const slots = { match: m.match, total: m.total, poQty: m.poQty, poExpected: m.poExpected, image: m.image }
+  if (m.list && m.location) slots.location = fromRoot(m.list, m.location)
   if (m.list && m.label) slots.label = fromRoot(m.list, m.label)
   if (m.list && m.qty) slots.qty = fromRoot(m.list, m.qty)
   // A { "Delhi": 10 } style list has no row fields: the list itself sits opposite quantity.
@@ -40,9 +43,13 @@ function toMapping(slots) {
     qty: '',
     poQty: slots.poQty ?? '',
     poExpected: slots.poExpected ?? '',
+    image: slots.image ?? '',
+    location: '',
   }
   const label = slots.label && splitRow(slots.label)
   const qty = slots.qty && splitRow(slots.qty)
+  const loc = slots.location && splitRow(slots.location)
+  if (loc) Object.assign(m, { list: loc.list, location: loc.rel })
   if (label) Object.assign(m, { list: label.list, label: label.rel })
   if (qty) Object.assign(m, { list: qty.list, qty: qty.rel })
   else if (slots.qty) m.list = slots.qty
@@ -97,7 +104,8 @@ export default function FieldMapper({ paths, mapping, onChange }) {
     if (next.qty && isMap(next.qty)) delete next.label
     const a = next.label && splitRow(next.label)
     const b = next.qty && splitRow(next.qty)
-    if (a && b && a.list !== b.list) return setMessage('Row name and row quantity must come from the same list.')
+    const c = next.location && splitRow(next.location)
+    if ((a && b && a.list !== b.list) || (c && (a ?? b) && c.list !== (a ?? b).list)) return setMessage('Row name and row quantity must come from the same list.')
 
     setMessage('')
     onChange(toMapping(next))
