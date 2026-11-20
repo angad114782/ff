@@ -273,7 +273,7 @@ export default function Vendors() {
               <div className="space-y-5">
               <section className="space-y-4">
                 <h4 className="text-sm font-semibold uppercase tracking-wide text-ink/60">1 · Vendor</h4>
-                {primaryNames.length > 0 && !typeName ? (
+                {primaryNames.length > 0 && !typeName && (!form.name || primaryNames.includes(form.name)) ? (
                   <Select
                     id="vName"
                     label="Vendor (from the primary API)"
